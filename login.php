@@ -25,10 +25,11 @@ if (isset($_POST['login'])) {
             $stmt->execute([$username, $password]);
             $user = $stmt->fetch();
             if ($user) {
-                $_SESSION['login'] = true;
-                $_SESSION['role']  = 'admin';
-                $_SESSION['id']    = $user['id_admin'];
-                $_SESSION['nama']  = $user['nama'];
+                $_SESSION['login']    = true;
+                $_SESSION['role']     = 'admin';
+                $_SESSION['id']       = $user['id_admin'];
+                $_SESSION['nama']     = $user['nama'];
+                $_SESSION['username'] = $user['username'];
                 header("Location: admin/dashboard.php");
                 exit;
             } else {
@@ -39,10 +40,12 @@ if (isset($_POST['login'])) {
             $stmt->execute([$username, $password]);
             $user = $stmt->fetch();
             if ($user) {
-                $_SESSION['login'] = true;
-                $_SESSION['role']  = 'dosen';
-                $_SESSION['id']    = $user['nip'];
-                $_SESSION['nama']  = $user['nama'];
+                $_SESSION['login']    = true;
+                $_SESSION['role']     = 'dosen';
+                $_SESSION['id']       = $user['nip'];
+                $_SESSION['nip']      = $user['nip'];
+                $_SESSION['nama']     = $user['nama'];
+                $_SESSION['username'] = $user['nip'];
                 header("Location: dosen/dashboard.php");
                 exit;
             } else {
@@ -53,10 +56,12 @@ if (isset($_POST['login'])) {
             $stmt->execute([$username, $password]);
             $user = $stmt->fetch();
             if ($user) {
-                $_SESSION['login'] = true;
-                $_SESSION['role']  = 'mahasiswa';
-                $_SESSION['id']    = $user['nim'];
-                $_SESSION['nama']  = $user['nama'];
+                $_SESSION['login']    = true;
+                $_SESSION['role']     = 'mahasiswa';
+                $_SESSION['id']       = $user['nim'];
+                $_SESSION['nim']      = $user['nim'];
+                $_SESSION['nama']     = $user['nama'];
+                $_SESSION['username'] = $user['nim'];
                 header("Location: mahasiswa/dashboard.php");
                 exit;
             } else {

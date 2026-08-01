@@ -11,22 +11,46 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'mahasiswa') {
 $nim = $_SESSION['username'] ?? $_SESSION['nim'] ?? $_SESSION['id'] ?? '';
 $pesan = '';
 
-// Proses Ambil Mata Kuliah
+// 1. Proses Ambil Mata Kuliah
 if (isset($_POST['ambil'])) {
     $kode_mk = $_POST['kode_mk'];
     try {
         $stmt = $koneksi->prepare("INSERT INTO krs (nim, kode_mk) VALUES (?, ?)");
         $stmt->execute([$nim, $kode_mk]);
-        $pesan = "<div class='alert alert-success'>Mata kuliah berhasil diambil!</div>";
+        $pesan = "<div class='alert alert-success alert-dismissible fade show' role='alert'>
+                    Mata kuliah berhasil diambil!
+                    <button type='button' class='btn-close' data-bs-dismiss='alert'></button>
+                  </div>";
     } catch (PDOException $e) {
-        $pesan = "<div class='alert alert-warning'>Mata kuliah sudah pernah diambil sebelumnya.</div>";
+        $pesan = "<div class='alert alert-warning alert-dismissible fade show' role='alert'>
+                    Mata kuliah ini sudah pernah kamu ambil!
+                    <button type='button' class='btn-close' data-bs-dismiss='alert'></button>
+                  </div>";
+    }
+}
+
+// 2. Proses Batal / Hapus Mata Kuliah
+if (isset($_POST['batal'])) {
+    $kode_mk = $_POST['kode_mk'];
+    try {
+        $stmt = $koneksi->prepare("DELETE FROM krs WHERE nim = ? AND kode_mk = ?");
+        $stmt->execute([$nim, $kode_mk]);
+        $pesan = "<div class='alert alert-info alert-dismissible fade show' role='alert'>
+                    Mata kuliah berhasil dibatalkan.
+                    <button type='button' class='btn-close' data-bs-dismiss='alert'></button>
+                  </div>";
+    } catch (PDOException $e) {
+        $pesan = "<div class='alert alert-danger alert-dismissible fade show' role='alert'>
+                    Gagal membatalkan mata kuliah.
+                    <button type='button' class='btn-close' data-bs-dismiss='alert'></button>
+                  </div>";
     }
 }
 
 // Ambil Daftar Mata Kuliah Tersedia
 $matakuliah = $koneksi->query("SELECT mk.*, d.nama AS nama_dosen FROM matakuliah mk LEFT JOIN dosen d ON mk.nip_dosen = d.nip")->fetchAll(PDO::FETCH_ASSOC);
 
-// Ambil Mata Kuliah yang Sudah Diambil Mahasiswa Ini (Dihapus k.id agar tidak error)
+// Ambil Mata Kuliah yang Sudah Diambil Mahasiswa Ini
 $krs_diambil = $koneksi->prepare("
     SELECT mk.kode_mk, mk.nama_mk, mk.sks, d.nama AS nama_dosen 
     FROM krs k 
@@ -78,7 +102,7 @@ $daftar_krs = $krs_diambil->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <button type="submit" name="ambil" class="btn btn-primary w-100 btn-sm">Tambahkan ke KRS</button>
+                        <button type="submit" name="ambil" class="btn btn-primary w-100 btn-sm fw-bold">Tambahkan ke KRS</button>
                     </form>
                 </div>
             </div>
@@ -94,6 +118,7 @@ $daftar_krs = $krs_diambil->fetchAll(PDO::FETCH_ASSOC);
                                 <th>Mata Kuliah</th>
                                 <th>SKS</th>
                                 <th>Dosen</th>
+                                <th class="text-center">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -104,11 +129,17 @@ $daftar_krs = $krs_diambil->fetchAll(PDO::FETCH_ASSOC);
                                     <td><?= htmlspecialchars($krs['nama_mk']) ?></td>
                                     <td><?= htmlspecialchars($krs['sks']) ?></td>
                                     <td><?= htmlspecialchars($krs['nama_dosen'] ?? 'Belum Diatur') ?></td>
+                                    <td class="text-center">
+                                        <form action="" method="POST" onsubmit="return confirm('Apakah Anda yakin ingin membatalkan mata kuliah ini?');">
+                                            <input type="hidden" name="kode_mk" value="<?= htmlspecialchars($krs['kode_mk']) ?>">
+                                            <button type="submit" name="batal" class="btn btn-outline-danger btn-sm">Batal</button>
+                                        </form>
+                                    </td>
                                 </tr>
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted">Belum ada mata kuliah yang diambil.</td>
+                                    <td colspan="5" class="text-center text-muted">Belum ada mata kuliah yang diambil.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -117,5 +148,7 @@ $daftar_krs = $krs_diambil->fetchAll(PDO::FETCH_ASSOC);
             </div>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

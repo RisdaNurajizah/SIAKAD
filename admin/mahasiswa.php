@@ -8,111 +8,319 @@ if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'admin') {
 }
 
 $pesan = '';
+$tipe_pesan = '';
 
-if (isset($_POST['tambah'])) {
-    $nim      = trim($_POST['nim']);
-    $nama     = trim($_POST['nama']);
-    $password = trim($_POST['password']);
-    $jurusan  = trim($_POST['jurusan']);
+// 1. Tambah Data Mahasiswa
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tambah_mahasiswa'])) {
+    $nim = trim($_POST['nim'] ?? '');
+    $nama = trim($_POST['nama'] ?? '');
+    $password = trim($_POST['password'] ?? '123456');
 
-    try {
-        $stmt = $koneksi->prepare("INSERT INTO mahasiswa (nim, nama, password, jurusan) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$nim, $nama, $password, $jurusan]);
-        $pesan = "<div class='alert alert-success'>Mahasiswa berhasil ditambahkan!</div>";
-    } catch (PDOException $e) {
-        $pesan = "<div class='alert alert-danger'>Gagal: " . $e->getMessage() . "</div>";
+    if (!empty($nim) && !empty($nama)) {
+        // Cek NIM
+        $cek = $koneksi->prepare("SELECT * FROM mahasiswa WHERE nim = ?");
+        $cek->execute([$nim]);
+        if ($cek->rowCount() > 0) {
+            $pesan = "NIM $nim sudah terdaftar!";
+            $tipe_pesan = "warning";
+        } else {
+            // Hash password jika tabel user terpisah, atau simpan langsung tergantung skema database
+            $stmt = $koneksi->prepare("INSERT INTO mahasiswa (nim, nama, password) VALUES (?, ?, ?)");
+            if ($stmt->execute([$nim, $nama, md5($password)])) {
+                $pesan = "Mahasiswa berhasil ditambahkan!";
+                $tipe_pesan = "success";
+            }
+        }
     }
 }
 
-if (isset($_GET['hapus'])) {
-    $nim_hapus = $_GET['hapus'];
-    $stmt = $koneksi->prepare("DELETE FROM mahasiswa WHERE nim = ?");
-    $stmt->execute([$nim_hapus]);
-    header("Location: mahasiswa.php");
-    exit;
+// 2. Edit Data Mahasiswa
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_mahasiswa'])) {
+    $nim = trim($_POST['nim'] ?? '');
+    $nama = trim($_POST['nama'] ?? '');
+
+    if (!empty($nim) && !empty($nama)) {
+        $stmt = $koneksi->prepare("UPDATE mahasiswa SET nama = ? WHERE nim = ?");
+        if ($stmt->execute([$nama, $nim])) {
+            $pesan = "Data mahasiswa berhasil diperbarui!";
+            $tipe_pesan = "success";
+        }
+    }
 }
 
-$mahasiswa = $koneksi->query("SELECT * FROM mahasiswa ORDER BY nim ASC")->fetchAll();
+// 3. Hapus Data Mahasiswa
+if (isset($_GET['hapus'])) {
+    $nim_hapus = $_GET['hapus'];
+    // Hapus juga record di KRS
+    $koneksi->prepare("DELETE FROM krs WHERE nim = ?")->execute([$nim_hapus]);
+    $stmt = $koneksi->prepare("DELETE FROM mahasiswa WHERE nim = ?");
+    if ($stmt->execute([$nim_hapus])) {
+        $pesan = "Mahasiswa berhasil dihapus!";
+        $tipe_pesan = "info";
+    }
+}
+
+// Ambil Seluruh Data Mahasiswa
+$stmt_mhs = $koneksi->query("SELECT * FROM mahasiswa ORDER BY nim ASC");
+$mahasiswa_list = $stmt_mhs->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Kelola Mahasiswa - SIAKAD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kelola Mahasiswa - SIAKAD UNIBBA</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #059669;
+            --primary-dark: #047857;
+            --bg-body: #f8fafc;
+            --sidebar-bg: #064e3b;
+            --card-border: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-body);
+            color: #334155;
+        }
+
+        .btn-primary, .bg-primary {
+            background-color: var(--primary) !important;
+            border-color: var(--primary) !important;
+        }
+
+        .wrapper { display: flex; min-height: 100vh; }
+
+        .sidebar {
+            width: 260px;
+            background: var(--sidebar-bg);
+            color: #fff;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .sidebar-brand {
+            padding: 1.5rem;
+            font-size: 1.2rem;
+            font-weight: 700;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: #34d399;
+        }
+
+        .sidebar-menu { padding: 1rem 0.75rem; }
+
+        .sidebar-menu .nav-link {
+            color: #a7f3d0;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            transition: all 0.2s;
+        }
+
+        .sidebar-menu .nav-link:hover,
+        .sidebar-menu .nav-link.active {
+            color: #ffffff;
+            background-color: var(--primary);
+        }
+
+        .main-content { flex-grow: 1; display: flex; flex-direction: column; }
+        .top-navbar { background: #fff; border-bottom: 1px solid var(--card-border); padding: 0.85rem 1.75rem; }
+        .content-body { padding: 1.75rem; }
+
+        .card-custom {
+            background: #ffffff;
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+
+        .table-custom th {
+            background: #f8fafc;
+            color: #64748b;
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            padding: 0.85rem 1rem;
+        }
+    </style>
 </head>
-<body class="bg-light">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-        <div class="container">
-            <a class="navbar-brand fw-bold" href="dashboard.php">SIAKAD - Admin</a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="dashboard.php">Dashboard</a>
-                <a class="nav-link active" href="mahasiswa.php">Mahasiswa</a>
-                <a class="nav-link" href="dosen.php">Dosen</a>
-                <a class="nav-link" href="matakuliah.php">Mata Kuliah</a>
-                <a class="nav-link btn btn-outline-light btn-sm ms-2" href="../logout.php">Logout</a>
+<body>
+
+<div class="wrapper">
+    <!-- Sidebar Admin -->
+    <aside class="sidebar">
+        <div>
+            <div class="sidebar-brand d-flex align-items-center gap-2">
+                <i class="bi bi-shield-lock-fill fs-4"></i>
+                <span>SIAKAD ADMIN</span>
+            </div>
+            <div class="sidebar-menu">
+                <small class="text-uppercase fw-bold px-3 fs-7 mb-2 d-block" style="font-size: 0.7rem; color: #a7f3d0;">Menu Utama</small>
+                <a href="dashboard.php" class="nav-link">
+                    <i class="bi bi-grid-1x2-fill"></i> Dashboard
+                </a>
+                <a href="mahasiswa.php" class="nav-link active">
+                    <i class="bi bi-people-fill"></i> Data Mahasiswa
+                </a>
+                <a href="dosen.php" class="nav-link">
+                    <i class="bi bi-person-badge-fill"></i> Data Dosen
+                </a>
+                <a href="matakuliah.php" class="nav-link">
+                    <i class="bi bi-journal-bookmark-fill"></i> Data Mata Kuliah
+                </a>
             </div>
         </div>
-    </nav>
+        <div class="p-3 border-top border-success border-opacity-25">
+            <a href="../logout.php" class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2">
+                <i class="bi bi-box-arrow-right"></i> Keluar
+            </a>
+        </div>
+    </aside>
 
-    <div class="container">
-        <h3 class="fw-bold mb-3">Kelola Data Mahasiswa</h3>
-        <?= $pesan ?>
-
-        <div class="row">
-            <div class="col-md-4 mb-4">
-                <div class="card shadow-sm p-3">
-                    <h5 class="fw-bold mb-3">Tambah Mahasiswa</h5>
-                    <form action="" method="POST">
-                        <div class="mb-2">
-                            <label class="form-label small">NIM</label>
-                            <input type="text" name="nim" class="form-control" required>
-                        </div>
-                        <div class="mb-2">
-                            <label class="form-label small">Nama Lengkap</label>
-                            <input type="text" name="nama" class="form-control" required>
-                        </div>
-                        <div class="mb-2">
-                            <label class="form-label small">Jurusan</label>
-                            <input type="text" name="jurusan" class="form-control" value="Teknik Informatika" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label small">Password</label>
-                            <input type="password" name="password" class="form-control" required>
-                        </div>
-                        <button type="submit" name="tambah" class="btn btn-primary w-100 btn-sm">Simpan Data</button>
-                    </form>
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="top-navbar d-flex justify-content-between align-items-center">
+            <h5 class="fw-bold mb-0 text-dark">Kelola Data Mahasiswa</h5>
+            <div class="d-flex align-items-center gap-2">
+                <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold shadow-sm" style="width: 42px; height: 42px;">
+                    A
                 </div>
             </div>
+        </header>
 
-            <div class="col-md-8">
-                <div class="card shadow-sm p-3">
-                    <h5 class="fw-bold mb-3">Daftar Mahasiswa</h5>
-                    <table class="table table-striped align-middle">
-                        <thead class="table-dark">
+        <div class="content-body">
+            <?php if (!empty($pesan)): ?>
+                <div class="alert alert-<?= $tipe_pesan ?> alert-dismissible fade show shadow-sm" role="alert">
+                    <i class="bi bi-info-circle-fill me-2"></i><?= htmlspecialchars($pesan) ?>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            <?php endif; ?>
+
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold mb-0 text-dark"><i class="bi bi-people-fill text-success me-2"></i>Daftar Mahasiswa</h6>
+                <button class="btn btn-primary btn-sm fw-semibold px-3" data-bs-toggle="modal" data-bs-target="#modalTambah">
+                    <i class="bi bi-plus-lg me-1"></i> Tambah Mahasiswa
+                </button>
+            </div>
+
+            <div class="card-custom p-4">
+                <div class="table-responsive">
+                    <table class="table table-hover table-custom align-middle mb-0">
+                        <thead>
                             <tr>
+                                <th style="width: 50px;">#</th>
                                 <th>NIM</th>
-                                <th>Nama</th>
-                                <th>Jurusan</th>
-                                <th>Aksi</th>
+                                <th>Nama Lengkap</th>
+                                <th class="text-center" style="width: 150px;">Aksi</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($mahasiswa as $mhs): ?>
-                            <tr>
-                                <td><?= htmlspecialchars($mhs['nim']) ?></td>
-                                <td><?= htmlspecialchars($mhs['nama']) ?></td>
-                                <td><?= htmlspecialchars($mhs['jurusan']) ?></td>
-                                <td>
-                                    <a href="mahasiswa.php?hapus=<?= $mhs['nim'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Hapus data ini?')">Hapus</a>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
+                            <?php if (count($mahasiswa_list) > 0): ?>
+                                <?php $no = 1; foreach ($mahasiswa_list as $mhs): ?>
+                                <tr>
+                                    <td><?= $no++ ?></td>
+                                    <td class="fw-semibold text-success"><?= htmlspecialchars($mhs['nim']) ?></td>
+                                    <td class="fw-bold text-dark"><?= htmlspecialchars($mhs['nama']) ?></td>
+                                    <td class="text-center">
+                                        <button class="btn btn-sm btn-outline-warning me-1" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#modalEdit<?= htmlspecialchars($mhs['nim']) ?>">
+                                            <i class="bi bi-pencil-square"></i>
+                                        </button>
+                                        <a href="?hapus=<?= urlencode($mhs['nim']) ?>" 
+                                           class="btn btn-sm btn-outline-danger"
+                                           onclick="return confirm('Apakah Anda yakin ingin menghapus mahasiswa ini?')">
+                                            <i class="bi bi-trash"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+
+                                <!-- Modal Edit -->
+                                <div class="modal fade" id="modalEdit<?= htmlspecialchars($mhs['nim']) ?>" tabindex="-1">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content">
+                                            <form method="POST" action="">
+                                                <div class="modal-header">
+                                                    <h6 class="modal-title fw-bold">Edit Data Mahasiswa</h6>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-3">
+                                                        <label class="form-label small text-muted">NIM</label>
+                                                        <input type="text" name="nim" class="form-control" value="<?= htmlspecialchars($mhs['nim']) ?>" readonly>
+                                                    </div>
+                                                    <div class="mb-3">
+                                                        <label class="form-label small text-muted">Nama Lengkap</label>
+                                                        <input type="text" name="nama" class="form-control" value="<?= htmlspecialchars($mhs['nama']) ?>" required>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Batal</button>
+                                                    <button type="submit" name="edit_mahasiswa" class="btn btn-primary btn-sm">Simpan Perubahan</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr>
+                                    <td colspan="4" class="text-center py-4 text-muted">Belum ada data mahasiswa.</td>
+                                </tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
             </div>
+
+        </div>
+    </main>
+</div>
+
+<!-- Modal Tambah Mahasiswa -->
+<div class="modal fade" id="modalTambah" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="">
+                <div class="modal-header">
+                    <h6 class="modal-title fw-bold">Tambah Mahasiswa Baru</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">NIM</label>
+                        <input type="text" name="nim" class="form-control" placeholder="Contoh: 10121001" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Nama Lengkap</label>
+                        <input type="text" name="nama" class="form-control" placeholder="Nama Mahasiswa" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Password Default</label>
+                        <input type="password" name="password" class="form-control" value="123456" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" name="tambah_mahasiswa" class="btn btn-primary btn-sm">Tambah Data</button>
+                </div>
+            </form>
         </div>
     </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -2,39 +2,46 @@
 session_start();
 require_once '../koneksi.php';
 
+// 1. Validasi Keamanan Akses (Harus Login sebagai Dosen)
 if (!isset($_SESSION['login']) || $_SESSION['role'] !== 'dosen') {
     header("Location: ../login.php");
     exit;
 }
 
-$nip = $_SESSION['username'] ?? $_SESSION['nip'] ?? '';
-$nama_dosen = $_SESSION['nama'] ?? 'Dosen';
+// 2. Ambil NIP dari Session Login
+$nip_dosen = $_SESSION['nip'] ?? $_SESSION['username'] ?? '';
 
-// 1. Total Mata Kuliah yang diampu
-$stmt_mk = $koneksi->prepare("SELECT COUNT(*) FROM matakuliah WHERE nip_dosen = ?");
-$stmt_mk->execute([$nip]);
-$total_mk = $stmt_mk->fetchColumn() ?: 0;
+// 3. Ambil Profile Dosen LANGSUNG dari Database (Agar Nama Selalu Akurat)
+$stmt_dosen = $koneksi->prepare("SELECT * FROM dosen WHERE nip = ?");
+$stmt_dosen->execute([$nip_dosen]);
+$dosen = $stmt_dosen->fetch(PDO::FETCH_ASSOC);
 
-// 2. Total Mahasiswa Bimbingan / Peserta Kelas
-$stmt_mhs = $koneksi->prepare("
-    SELECT COUNT(DISTINCT k.nim) 
+$nama_dosen  = !empty($dosen['nama']) ? $dosen['nama'] : 'Dosen';
+$nip_display = !empty($dosen['nip']) ? $dosen['nip'] : $nip_dosen;
+
+// 4. Ambil Daftar Mata Kuliah & Jumlah Mahasiswa (Menggunakan COUNT(k.nim) agar aman)
+$stmt_mk = $koneksi->prepare("
+    SELECT m.*, COUNT(k.nim) AS jumlah_mhs 
+    FROM matakuliah m 
+    LEFT JOIN krs k ON m.kode_mk = k.kode_mk 
+    WHERE m.nip_dosen = ? 
+    GROUP BY m.kode_mk
+");
+$stmt_mk->execute([$nip_dosen]);
+$list_mk = $stmt_mk->fetchAll(PDO::FETCH_ASSOC);
+
+$total_mk = count($list_mk);
+
+// 5. Hitung Total Mahasiswa Unik yang Diajar
+$stmt_mhs_count = $koneksi->prepare("
+    SELECT COUNT(DISTINCT k.nim) AS total_mhs 
     FROM krs k 
-    JOIN matakuliah mk ON k.kode_mk = mk.kode_mk 
-    WHERE mk.nip_dosen = ?
+    JOIN matakuliah m ON k.kode_mk = m.kode_mk 
+    WHERE m.nip_dosen = ?
 ");
-$stmt_mhs->execute([$nip]);
-$total_mhs = $stmt_mhs->fetchColumn() ?: 0;
-
-// 3. Daftar Mata Kuliah yang Diampu
-$stmt_list_mk = $koneksi->prepare("
-    SELECT mk.kode_mk, mk.nama_mk, mk.sks, 
-           (SELECT COUNT(*) FROM krs WHERE kode_mk = mk.kode_mk) AS total_peserta
-    FROM matakuliah mk
-    WHERE mk.nip_dosen = ?
-    ORDER BY mk.kode_mk ASC
-");
-$stmt_list_mk->execute([$nip]);
-$matkul_diampu = $stmt_list_mk->fetchAll(PDO::FETCH_ASSOC);
+$stmt_mhs_count->execute([$nip_dosen]);
+$data_mhs_count = $stmt_mhs_count->fetch(PDO::FETCH_ASSOC);
+$total_mhs = $data_mhs_count['total_mhs'] ?? 0;
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -51,235 +58,226 @@ $matkul_diampu = $stmt_list_mk->fetchAll(PDO::FETCH_ASSOC);
 
     <style>
         :root {
-            --primary: #059669;
-            --primary-dark: #047857;
-            --bg-body: #f8fafc;
-            --sidebar-bg: #064e3b;
-            --card-border: #e2e8f0;
+            --sidebar-width: 250px;
+            --primary-green: #059669;
+            --primary-dark: #064e3b;
+            --bg-light: #f8fafc;
         }
 
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            background-color: var(--bg-body);
-            color: #334155;
+            background-color: var(--bg-light);
         }
 
-        .btn-primary, .bg-primary {
-            background-color: var(--primary) !important;
-            border-color: var(--primary) !important;
-        }
-
-        .wrapper { display: flex; min-height: 100vh; }
-
-        /* Sidebar Styling */
         .sidebar {
-            width: 260px;
-            background: var(--sidebar-bg);
-            color: #fff;
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+            width: var(--sidebar-width);
+            height: 100vh;
+            position: fixed;
+            top: 0;
+            left: 0;
+            background-color: var(--primary-dark);
+            color: #ffffff;
+            padding: 1.5rem 1rem;
+            z-index: 1000;
         }
 
-        .sidebar-brand {
-            padding: 1.5rem;
-            font-size: 1.2rem;
-            font-weight: 700;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            color: #34d399;
-        }
-
-        .sidebar-menu { padding: 1rem 0.75rem; }
-
-        .sidebar-menu .nav-link {
-            color: #a7f3d0;
+        .sidebar .nav-link {
+            color: rgba(255, 255, 255, 0.7);
+            border-radius: 10px;
             padding: 0.75rem 1rem;
-            border-radius: 8px;
-            margin-bottom: 0.25rem;
+            margin-bottom: 0.5rem;
             font-weight: 500;
             display: flex;
             align-items: center;
-            gap: 0.75rem;
-            transition: all 0.2s;
         }
 
-        .sidebar-menu .nav-link:hover,
-        .sidebar-menu .nav-link.active {
+        .sidebar .nav-link.active, .sidebar .nav-link:hover {
             color: #ffffff;
-            background-color: var(--primary);
+            background-color: var(--primary-green);
         }
 
-        /* Content Area */
-        .main-content { flex-grow: 1; display: flex; flex-direction: column; }
-        .top-navbar { background: #fff; border-bottom: 1px solid var(--card-border); padding: 0.85rem 1.75rem; }
-        .content-body { padding: 1.75rem; }
-
-        .card-custom {
-            background: #ffffff;
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        .main-content {
+            margin-left: var(--sidebar-width);
+            padding: 2rem;
         }
 
-        .table-custom th {
-            background: #f8fafc;
-            color: #64748b;
-            font-weight: 600;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            padding: 0.85rem 1rem;
-        }
-
-        .welcome-card {
-            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        .banner-welcome {
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
             color: white;
             border-radius: 16px;
             padding: 2rem;
+        }
+
+        .avatar-circle {
+            width: 44px;
+            height: 44px;
+            background-color: var(--primary-green);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .card-stat {
+            border: none;
+            border-radius: 14px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+            transition: transform 0.2s;
+        }
+
+        .card-stat:hover {
+            transform: translateY(-3px);
+        }
+
+        .icon-box {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+        }
+
+        .table-custom {
+            background: white;
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
         }
     </style>
 </head>
 <body>
 
-<div class="wrapper">
-    <!-- Sidebar Dosen -->
-    <aside class="sidebar">
-        <div>
-            <div class="sidebar-brand d-flex align-items-center gap-2">
-                <i class="bi bi-person-workspace fs-4"></i>
-                <span>SIAKAD DOSEN</span>
-            </div>
-            <div class="sidebar-menu">
-                <small class="text-uppercase fw-bold px-3 fs-7 mb-2 d-block" style="font-size: 0.7rem; color: #a7f3d0;">Menu Utama</small>
-                <a href="dashboard.php" class="nav-link active">
-                    <i class="bi bi-grid-1x2-fill"></i> Dashboard
-                </a>
-                <a href="input_nilai.php" class="nav-link">
-                    <i class="bi bi-pencil-square"></i> Input Nilai
-                </a>
-            </div>
+<!-- Sidebar Navigasi -->
+<div class="sidebar d-flex flex-column justify-content-between">
+    <div>
+        <div class="d-flex align-items-center mb-4 px-2">
+            <i class="bi bi-person-badge-fill fs-3 text-warning me-2"></i>
+            <h5 class="fw-bold mb-0 text-white">SIAKAD DOSEN</h5>
         </div>
-        <div class="p-3 border-top border-success border-opacity-25">
-            <a href="../logout.php" class="btn btn-outline-danger w-100 btn-sm d-flex align-items-center justify-content-center gap-2">
-                <i class="bi bi-box-arrow-right"></i> Keluar
-            </a>
-        </div>
-    </aside>
-
-    <!-- Main Content -->
-    <main class="main-content">
-        <header class="top-navbar d-flex justify-content-between align-items-center">
-            <h5 class="fw-bold mb-0 text-dark">Dashboard Dosen</h5>
-            <div class="d-flex align-items-center gap-3">
-                <div class="text-end">
-                    <div class="fw-bold fs-6 text-dark"><?= htmlspecialchars($nama_dosen) ?></div>
-                    <small class="text-muted" style="font-size: 0.8rem;">NIP: <?= htmlspecialchars($nip) ?></small>
-                </div>
-                <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold shadow-sm" style="width: 42px; height: 42px;">
-                    <?= strtoupper(substr($nama_dosen, 0, 1)) ?>
-                </div>
-            </div>
-        </header>
-
-        <div class="content-body">
-            <!-- Banner Selamat Datang -->
-            <div class="welcome-card mb-4 shadow-sm">
-                <div class="row align-items-center">
-                    <div class="col-md-8">
-                        <h3 class="fw-bold mb-2">Selamat Datang, <?= htmlspecialchars($nama_dosen) ?>! 👋</h3>
-                        <p class="mb-0 text-white-50">
-                            Kelola nilai mahasiswa dan pantau mata kuliah yang Anda ampu dengan mudah melalui portal ini.
-                        </p>
-                    </div>
-                    <div class="col-md-4 text-md-end mt-3 mt-md-0">
-                        <a href="input_nilai.php" class="btn btn-light text-success fw-bold px-4 py-2 rounded-pill shadow-sm">
-                            <i class="bi bi-pencil-square me-1"></i> Input Nilai
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Ringkasan Statistik -->
-            <div class="row g-3 mb-4">
-                <div class="col-md-6">
-                    <div class="card-custom p-3 border-start border-success border-4 d-flex align-items-center gap-3">
-                        <div class="bg-success bg-opacity-10 text-success p-3 rounded-3">
-                            <i class="bi bi-journal-bookmark-fill fs-3"></i>
-                        </div>
-                        <div>
-                            <span class="text-muted small d-block mb-1">Mata Kuliah Diampu</span>
-                            <h3 class="fw-bold mb-0 text-dark"><?= $total_mk ?> Matkul</h3>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="card-custom p-3 border-start border-emerald border-4 d-flex align-items-center gap-3" style="border-left-color: var(--primary) !important;">
-                        <div class="bg-success bg-opacity-10 text-success p-3 rounded-3">
-                            <i class="bi bi-people-fill fs-3"></i>
-                        </div>
-                        <div>
-                            <span class="text-muted small d-block mb-1">Total Mahasiswa Ajar</span>
-                            <h3 class="fw-bold mb-0 text-dark"><?= $total_mhs ?> Mahasiswa</h3>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tabel Mata Kuliah yang Diampu -->
-            <div class="card-custom p-4">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6 class="fw-bold mb-0 text-dark">
-                        <i class="bi bi-book-half text-success me-2"></i>Daftar Mata Kuliah yang Diampu
-                    </h6>
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-hover table-custom align-middle mb-0">
-                        <thead>
-                            <tr>
-                                <th>Kode</th>
-                                <th>Mata Kuliah</th>
-                                <th class="text-center">SKS</th>
-                                <th class="text-center">Jumlah Mahasiswa</th>
-                                <th class="text-center">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (count($matkul_diampu) > 0): ?>
-                                <?php foreach ($matkul_diampu as $row): ?>
-                                <tr>
-                                    <td class="fw-semibold text-success"><?= htmlspecialchars($row['kode_mk']) ?></td>
-                                    <td class="fw-bold text-dark"><?= htmlspecialchars($row['nama_mk']) ?></td>
-                                    <td class="text-center">
-                                        <span class="badge bg-light text-dark border"><?= htmlspecialchars($row['sks']) ?> SKS</span>
-                                    </td>
-                                    <td class="text-center">
-                                        <span class="badge bg-success bg-opacity-10 text-success px-3 py-2 fw-semibold">
-                                            <i class="bi bi-person me-1"></i><?= $row['total_peserta'] ?> Mahasiswa
-                                        </span>
-                                    </td>
-                                    <td class="text-center">
-                                        <a href="input_nilai.php?kode_mk=<?= urlencode($row['kode_mk']) ?>" class="btn btn-outline-success btn-sm rounded-2">
-                                            <i class="bi bi-pencil me-1"></i> Input Nilai
-                                        </a>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="5" class="text-center py-4 text-muted">
-                                        Belum ada mata kuliah yang dialokasikan untuk Anda.
-                                    </td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-        </div>
-    </main>
+        <small class="text-uppercase text-muted fw-bold fs-7 mb-2 d-block px-2">Menu Utama</small>
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a href="dashboard.php" class="nav-link active"><i class="bi bi-grid-fill me-2"></i> Dashboard</a>
+            </li>
+            <li class="nav-item">
+                <a href="input_nilai.php" class="nav-link"><i class="bi bi-pencil-square me-2"></i> Input Nilai</a>
+            </li>
+        </ul>
+    </div>
+    <div>
+        <a href="../logout.php" class="nav-link text-danger fw-semibold px-2">
+            <i class="bi bi-box-arrow-right me-2"></i> Keluar
+        </a>
+    </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<!-- Area Utama -->
+<div class="main-content">
+    
+    <!-- Profil Header Kanan Atas -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold text-dark mb-0">Dashboard Dosen</h4>
+        <div class="d-flex align-items-center gap-3">
+            <div class="text-end">
+                <div class="fw-bold text-dark"><?= htmlspecialchars($nama_dosen) ?></div>
+                <div class="text-muted small">NIP: <?= htmlspecialchars($nip_display) ?></div>
+            </div>
+            <div class="avatar-circle">
+                <?= strtoupper(substr($nama_dosen, 0, 1)) ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Banner Menyapa -->
+    <div class="banner-welcome mb-4 d-flex justify-content-between align-items-center shadow-sm">
+        <div>
+            <h2 class="fw-bold mb-2">Selamat Datang, <?= htmlspecialchars($nama_dosen) ?>! 👋</h2>
+            <p class="mb-0 opacity-90">Kelola nilai mahasiswa dan pantau mata kuliah yang Anda ampu dengan mudah melalui portal ini.</p>
+        </div>
+        <a href="input_nilai.php" class="btn btn-light text-success fw-bold px-4 py-2 rounded-3 shadow-sm">
+            <i class="bi bi-pencil-square me-1"></i> Input Nilai
+        </a>
+    </div>
+
+    <!-- Kartu Statistik -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card card-stat p-3 bg-white">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="icon-box bg-success bg-opacity-10 text-success">
+                        <i class="bi bi-journal-bookmark-fill"></i>
+                    </div>
+                    <div>
+                        <div class="text-muted small">Mata Kuliah Diampu</div>
+                        <h3 class="fw-bold mb-0 text-dark"><?= $total_mk ?> Matkul</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card card-stat p-3 bg-white">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="icon-box bg-primary bg-opacity-10 text-primary">
+                        <i class="bi bi-people-fill"></i>
+                    </div>
+                    <div>
+                        <div class="text-muted small">Total Mahasiswa Ajar</div>
+                        <h3 class="fw-bold mb-0 text-dark"><?= $total_mhs ?> Mahasiswa</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabel Mata Kuliah yang Diampu -->
+    <div class="card table-custom p-4 border-0">
+        <h5 class="fw-bold mb-3 text-dark"><i class="bi bi-journal-text me-2 text-success"></i>Daftar Mata Kuliah yang Diampu</h5>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>KODE</th>
+                        <th>MATA KULIAH</th>
+                        <th>SKS</th>
+                        <th>JUMLAH MAHASISWA</th>
+                        <th class="text-center">AKSI</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($list_mk)): ?>
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">Belum ada mata kuliah yang diampu.</td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($list_mk as $mk): ?>
+                            <tr>
+                                <td class="fw-bold text-success"><?= htmlspecialchars($mk['kode_mk']) ?></td>
+                                <td class="fw-semibold text-dark"><?= htmlspecialchars($mk['nama_mk']) ?></td>
+                                <td><?= htmlspecialchars($mk['sks']) ?> SKS</td>
+                                <td>
+                                    <span class="badge bg-success bg-opacity-10 text-success px-3 py-2 rounded-pill">
+                                        <i class="bi bi-person me-1"></i><?= $mk['jumlah_mhs'] ?> Mahasiswa
+                                    </span>
+                                </td>
+                                <td class="text-center">
+                                    <a href="input_nilai.php?kode_mk=<?= $mk['kode_mk'] ?>" class="btn btn-sm btn-outline-success rounded-3 px-3">
+                                        <i class="bi bi-pencil-square me-1"></i> Input Nilai
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
 </body>
 </html>
